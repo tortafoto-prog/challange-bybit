@@ -15,10 +15,11 @@ class Config:
     #   {
     #     "name": "User1",
     #     "id": "u1",
-    #     "is_eu": false, # Optional, default false (Global)
-    #     "live": {"key": "...", "secret": "..."},    # Optional
-    #     "testnet": {"key": "...", "secret": "..."}  # Optional
+    #     "is_eu": false, # Optional, use true for .eu endpoints
+    #     "live": {"key": "...", "secret": "..."},    # Can coexist with testnet!
+    #     "testnet": {"key": "...", "secret": "..."}  # Can coexist with live!
     #   },
+
     #   ...
     # ]
     # ------------------------------------------------------------------

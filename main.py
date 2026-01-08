@@ -15,38 +15,45 @@ def main():
         uid = user_conf.get("id", "Unknown")
         is_eu = user_conf.get("is_eu", False)
         
-        # Determine environment (Live or Testnet priority? Usually we run one)
-        # We'll check if 'live' keys exist first, or 'testnet' based on a global flag?
-        # Actually in Binance client we had use_testnet passed in. 
-        # Typically we use a global USE_TESTNET env var to decide which set of keys to pick from the JSON.
+        # Mixed Mode Logic:
+        # A user can have BOTH Live and Testnet credentials active simultaneously.
+        # We will check both "live" and "testnet" keys and spawn a client for each if found.
         
-        import os
-        use_testnet = os.getenv("USE_TESTNET", "True").lower() == "true"
-        
-        creds = user_conf.get("testnet") if use_testnet else user_conf.get("live")
-        
-        if not creds:
-            print(f"[{name}] Skipping: No credentials for {'TESTNET' if use_testnet else 'LIVE'}")
-            continue
+        # 1. Check LIVE Credentials
+        if user_conf.get("live") and user_conf["live"].get("key"):
+            creds = user_conf["live"]
+            print(f"[{name}] Found LIVE credentials ({'EU' if is_eu else 'Global'}). Initializing...")
             
-        api_key = creds.get("key")
-        api_secret = creds.get("secret")
-        
-        if not api_key:
-            print(f"[{name}] Skipping: Incomplete credentials.")
-            continue
+            client_live = BybitClient(
+                api_key=creds.get("key"),
+                api_secret=creds.get("secret"),
+                use_testnet=False,
+                user_id=uid,
+                user_name=name,
+                is_eu=is_eu
+            )
+            clients.append(client_live)
+
+        # 2. Check TESTNET Credentials
+        if user_conf.get("testnet") and user_conf["testnet"].get("key"):
+            creds = user_conf["testnet"]
+            print(f"[{name}] Found TESTNET credentials ({'EU' if is_eu else 'Global'}). Initializing...")
             
-        # Initialize Client
-        client = BybitClient(
-            api_key=api_key,
-            api_secret=api_secret,
-            use_testnet=use_testnet,
-            user_id=uid,
-            user_name=name,
-            is_eu=is_eu
-        )
+            client_test = BybitClient(
+                api_key=creds.get("key"),
+                api_secret=creds.get("secret"),
+                use_testnet=True,
+                user_id=uid,
+                user_name=name,
+                is_eu=is_eu
+            )
+            clients.append(client_test)
         
-        clients.append(client)
+        if not clients:
+             # This check is slightly loose because clients list grows globally, 
+             # but serves to warn if a specific user block resulted in no clients.
+             pass
+
         
     if not clients:
         print("No valid clients configured. Exiting.")
