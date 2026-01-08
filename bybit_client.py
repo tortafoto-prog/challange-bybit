@@ -211,6 +211,7 @@ class BybitClient:
                 ticket_id=ticket_id + "_close",
                 is_closing="Yes",
                 is_history=is_history,
+                open_time_str=open_time_str,
                 stop_loss="",
                 take_profit=""
             )
@@ -226,6 +227,7 @@ class BybitClient:
                 ticket_id=ticket_id + "_open",
                 is_closing="No",
                 is_history=is_history,
+                open_time_str=open_time_str,
                 stop_loss=None,  # Will fetch from API
                 take_profit=None
             )
@@ -243,11 +245,12 @@ class BybitClient:
             ticket_id=ticket_id,
             is_closing=is_closing,
             is_history=is_history,
+            open_time_str=open_time_str,
             stop_loss=None,
             take_profit=None
         )
     
-    def _send_trade_webhook(self, data, symbol, side, price, volume, ticket_id, is_closing, is_history, stop_loss=None, take_profit=None):
+    def _send_trade_webhook(self, data, symbol, side, price, volume, ticket_id, is_closing, is_history, open_time_str, stop_loss=None, take_profit=None):
         """Helper method to send a single trade webhook."""
         # SL/TP Extraction (only for opening trades)
         if stop_loss is None and take_profit is None:  # Only fetch if not provided
