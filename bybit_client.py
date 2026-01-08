@@ -37,9 +37,9 @@ class BybitClient:
         # EU: stream.bybit.eu
         # Pybit typically maps 'domain' to specific presets.
         
-        self.domain_suffix = "bybit" # default
+        self.domain_suffix = "" # default (global .com)
         if self.is_eu:
-            self.domain_suffix = "bybit.eu" # Verify this mapping in pybit
+            self.domain_suffix = "bytick"  # pybit uses 'bytick' for EU endpoints
             
         # Initialize HTTP Session (for History Sync / REST calls)
         try:
@@ -123,12 +123,8 @@ class BybitClient:
         """Fetch recent executions to catch up."""
         print(f"[{self.user_name}] Syncing History...")
         try:
-            # Get last 50 executions
-            # Category 'linear' for USDT Perps (Standard) or 'inverse'?
-            # Usually users trade USDT Perps. V5 'category' is required.
-            # We'll check 'linear' (USDT-M) and maybe 'spot' if configured? 
-            # Assuming 'linear' for Futures.
-            
+            # Category 'linear' for USDT Perps
+            # IMPORTANT: Specify category in the request to ensure we get category field in response
             resp = self.session.get_executions(category="linear", limit=20)
             if resp['retCode'] == 0:
                 result = resp['result']
@@ -168,7 +164,8 @@ class BybitClient:
         
         # FILTER: Only process Linear (USDT Perpetual/Futures) trades
         # Ignore: spot, inverse, option
-        category = data.get('category', '')
+        # NOTE: History sync already filters by category='linear', so this mainly affects live stream
+        category = data.get('category', 'linear')  # Default to linear if missing (for history items)
         if category != 'linear':
             print(f"[{self.user_name}] Ignoring {category} trade: {data.get('symbol')}")
             return
