@@ -25,6 +25,12 @@ class BybitClient:
         self.last_start_time = 0
         self.reconnect_delay = 5
         
+        # Execution Aggregation (for partial fills)
+        # {orderId: {'data': first_exec_data, 'total_volume': float, 'total_closed': float, 'timer': threading.Timer}}
+        self.pending_executions = {}
+        self.aggregation_lock = threading.Lock()
+        self.aggregation_delay = 1.0  # Wait 1 second to collect all fills from same order
+        
         # Setup Endpoints (pybit handles URLs mostly, but we specify testnet boolean and suffix)
         # For .eu, pybit might need 'domain' arg or manual URL override?
         # Checking pybit docs: WebSocket(testnet=True, domain="bybit" or "byTick" or "bybit.eu"?)
@@ -164,12 +170,92 @@ class BybitClient:
         
         # FILTER: Only process Linear (USDT Perpetual/Futures) trades
         # Ignore: spot, inverse, option
-        # NOTE: History sync already filters by category='linear', so this mainly affects live stream
         category = data.get('category', 'linear')  # Default to linear if missing (for history items)
         if category != 'linear':
             print(f"[{self.user_name}] Ignoring {category} trade: {data.get('symbol')}")
             return
         
+        # For history sync, process immediately without aggregation
+        if is_history:
+            self._process_single_execution(data, is_history=True)
+            return
+        
+        # For live stream, aggregate by OrderID
+        order_id = str(data.get('orderId', ''))
+        if not order_id:
+            print(f"[{self.user_name}] Warning: Execution without OrderID, processing immediately")
+            self._process_single_execution(data, is_history=False)
+            return
+        
+        with self.aggregation_lock:
+            if order_id in self.pending_executions:
+                # Add to existing aggregation
+                pending = self.pending_executions[order_id]
+                pending['total_volume'] += float(data.get('execQty', 0))
+                
+                closed_size_raw = data.get('closedSize', '0')
+                try:
+                    closed_size = float(closed_size_raw) if closed_size_raw else 0.0
+                except (ValueError, TypeError):
+                    closed_size = 0.0
+                pending['total_closed'] += closed_size
+                
+                # Cancel old timer and restart
+                if pending['timer']:
+                    pending['timer'].cancel()
+                
+                pending['timer'] = threading.Timer(
+                    self.aggregation_delay,
+                    self._flush_aggregated_execution,
+                    args=(order_id,)
+                )
+                pending['timer'].start()
+                
+                print(f"[{self.user_name}] Aggregating OrderID {order_id}: {pending['total_volume']} total volume")
+            else:
+                # First execution for this OrderID
+                closed_size_raw = data.get('closedSize', '0')
+                try:
+                    closed_size = float(closed_size_raw) if closed_size_raw else 0.0
+                except (ValueError, TypeError):
+                    closed_size = 0.0
+                
+                timer = threading.Timer(
+                    self.aggregation_delay,
+                    self._flush_aggregated_execution,
+                    args=(order_id,)
+                )
+                timer.start()
+                
+                self.pending_executions[order_id] = {
+                    'data': data.copy(),
+                    'total_volume': float(data.get('execQty', 0)),
+                    'total_closed': closed_size,
+                    'timer': timer
+                }
+                
+                print(f"[{self.user_name}] Started aggregation for OrderID {order_id}")
+    
+    def _flush_aggregated_execution(self, order_id):
+        """Send aggregated execution after delay."""
+        with self.aggregation_lock:
+            if order_id not in self.pending_executions:
+                return
+            
+            pending = self.pending_executions.pop(order_id)
+            data = pending['data']
+            total_volume = pending['total_volume']
+            total_closed = pending['total_closed']
+        
+        # Update data with aggregated values
+        data['execQty'] = str(total_volume)
+        data['closedSize'] = str(total_closed)
+        
+        print(f"[{self.user_name}] Flushing aggregated OrderID {order_id}: {total_volume} volume, {total_closed} closed")
+        self._process_single_execution(data, is_history=False)
+    
+    def _process_single_execution(self, data, is_history=False):
+        """Process a single (possibly aggregated) execution."""
         symbol = data['symbol']
 
         side = data['side'].upper() # BUY / SELL
@@ -276,12 +362,9 @@ class BybitClient:
             if take_profit is None:
                 take_profit = ""
         
-        # Position ID logic: Symbol_Side_OrderID
-        # This handles partial fills correctly (multiple executions with same OrderID)
-        # For closing trades, we use the closing order's ID
-        # For opening trades, we use the opening order's ID
-        order_id = str(data['orderId'])
-        position_id = f"{symbol}_{side}_{order_id}"
+        # Position ID logic: Symbol_SL_Volume (same as Binance)
+        # Google Sheet will handle partial fills via FIFO volume matching
+        position_id = f"{symbol}_{stop_loss}_{volume}"
         
         trade_data = {
             "secret_key": Config.APP_SECRET,
