@@ -158,8 +158,7 @@ class BybitClient:
     def process_trade_data(self, data, is_history=False):
         # Bybit V5 Execution Data Fields:
         # symbol, side (Buy/Sell), execPrice, execQty, execId, orderId
-        # isMaker (bool)
-        # createTime (ms)
+        # closedSize (if position was closed)
         
         symbol = data['symbol']
         side = data['side'].upper() # BUY / SELL
@@ -172,44 +171,26 @@ class BybitClient:
         ts = int(data['execTime'])
         open_time_str = self.convert_timestamp(ts)
         
-        # SL/TP? Bybit Execution stream doesn't always send SL/TP.
-        # It sends 'stopLoss', 'takeProfit' in the execution item IF created?
-        # Actually V5 'execution' topic data has 'stopLog', 'takeProfit' fields?
-        # NO, usually it's in the Order stream.
-        # But let's check what we have.
-        # For now, placeholder or check logic?
-        # We'll use empty SL/TP or implement lookups later if needed.
-        # Bybit V5 Execution payload usually does NOT have SL/TP values.
-        # We might need to query the Order if we really need them.
-        # But for 'Tracker', usually the User ensures SL is set.
+        # Detect if this is a CLOSING trade
+        # Bybit provides 'closedSize' field - if > 0, it means position was reduced/closed
+        closed_size = float(data.get('closedSize', 0))
+        is_closing = "Yes" if closed_size > 0 else "No"
         
-        stop_loss = "" # Todo: Fetch if critical
+        # SL/TP Extraction
+        # Bybit Execution stream does NOT include SL/TP!
+        # We must query Position Info API to get these values
+        stop_loss = ""
         take_profit = ""
         
-        # Position ID logic
-        # Opening: symbol_sl_vol ?
-        # Closing: ?
-        # Bybit has 'closedSize'? 'execType'? 
-        # Logic: If 'closedSize' > 0 ? No, 'execType' == 'Trade'?
-        # Bybit treats closing as separate execution.
-        # How to detect CLOSING?
-        # V5: execType might help? No.
-        # Usually we rely on ReduceOnly flag?
-        # Data has 'isReduceOnly'? Yes! (In Order stream, maybe not Execution?)
-        # Let's check docs or logs. Assuming we treat all as valid fills.
-        # For closing logic in Sheet, we just need direction.
+        if is_closing == "No":
+            # Only fetch SL/TP for opening trades
+            sl_tp = self.get_position_sl_tp(symbol)
+            if sl_tp:
+                stop_loss = sl_tp.get('stopLoss', '')
+                take_profit = sl_tp.get('takeProfit', '')
         
-        # Heuristic: User asked for Position ID = Ticker_SL_Vol
-        # Without SL, we can't generate the Opening ID consistently if we rely on it.
-        # We will use OrderID as fallback PositionID for now? 
-        # Or Ticker_0_Volume.
-        
+        # Position ID logic: Ticker_SL_Volume
         position_id = f"{symbol}_{stop_loss}_{volume}"
-        
-        # Is Closing?
-        # If we can't tell, send "Unknown". Sheet logic handles FIFO.
-        # But if we want proper "Matched" comment...
-        # Let's default to "No" unless we know.
         
         trade_data = {
             "secret_key": Config.APP_SECRET,
@@ -222,15 +203,40 @@ class BybitClient:
             "ticket_id": ticket_id,
             "stop_loss": stop_loss,
             "take_profit": take_profit,
-            "is_closing": "Unknown", # Sheet will solve
-            "order_type": "MARKET",
+            "is_closing": is_closing,
+            "order_type": data.get('orderType', 'MARKET'),
             "position_id": position_id,
             "open_time": open_time_str,
             "comment": "Bybit History" if is_history else "Bybit Stream"
         }
         
-        print(f"[{self.user_name}] TRADE: {symbol} {side} {volume} @ {price}")
+        print(f"[{self.user_name}] TRADE: {symbol} {side} {volume} @ {price} (SL: {stop_loss}, TP: {take_profit})")
         self.send_webhook(trade_data)
+
+    def get_position_sl_tp(self, symbol):
+        """Query Position Info API to get SL/TP for a symbol."""
+        try:
+            resp = self.session.get_positions(
+                category="linear",
+                symbol=symbol
+            )
+            
+            if resp['retCode'] == 0:
+                positions = resp['result'].get('list', [])
+                if positions:
+                    # Return first position (usually only one per symbol in one-way mode)
+                    pos = positions[0]
+                    return {
+                        'stopLoss': pos.get('stopLoss', ''),
+                        'takeProfit': pos.get('takeProfit', '')
+                    }
+            else:
+                print(f"[{self.user_name}] Position API Error: {resp}")
+        except Exception as e:
+            print(f"[{self.user_name}] Failed to fetch Position SL/TP: {e}")
+        
+        return None
+
 
     def convert_timestamp(self, ts_ms):
         try:
