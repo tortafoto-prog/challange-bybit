@@ -276,8 +276,12 @@ class BybitClient:
             if take_profit is None:
                 take_profit = ""
         
-        # Position ID logic: Ticker_SL_Volume
-        position_id = f"{symbol}_{stop_loss}_{volume}"
+        # Position ID logic: Symbol_Side_OrderID
+        # This handles partial fills correctly (multiple executions with same OrderID)
+        # For closing trades, we use the closing order's ID
+        # For opening trades, we use the opening order's ID
+        order_id = str(data['orderId'])
+        position_id = f"{symbol}_{side}_{order_id}"
         
         trade_data = {
             "secret_key": Config.APP_SECRET,
