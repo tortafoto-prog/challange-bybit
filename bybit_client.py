@@ -151,16 +151,30 @@ class BybitClient:
         try:
             data_list = message.get('data', [])
             for exec_item in data_list:
-                self.process_trade_data(exec_item, is_history=False)
+                try:
+                    self.process_trade_data(exec_item, is_history=False)
+                except Exception as item_error:
+                    print(f"[{self.user_name}] Error processing execution item: {item_error}")
+                    # Continue processing other items even if one fails
         except Exception as e:
             print(f"[{self.user_name}] Error processing message: {e}")
 
+
     def process_trade_data(self, data, is_history=False):
         # Bybit V5 Execution Data Fields:
+        # category: spot, linear, inverse, option
         # symbol, side (Buy/Sell), execPrice, execQty, execId, orderId
         # closedSize (if position was closed)
         
+        # FILTER: Only process Linear (USDT Perpetual/Futures) trades
+        # Ignore: spot, inverse, option
+        category = data.get('category', '')
+        if category != 'linear':
+            print(f"[{self.user_name}] Ignoring {category} trade: {data.get('symbol')}")
+            return
+        
         symbol = data['symbol']
+
         side = data['side'].upper() # BUY / SELL
         price = float(data['execPrice'])
         volume = float(data['execQty'])
@@ -173,7 +187,13 @@ class BybitClient:
         
         # Detect if this is a CLOSING trade
         # Bybit provides 'closedSize' field - if > 0, it means position was reduced/closed
-        closed_size = float(data.get('closedSize', 0))
+        # IMPORTANT: closedSize can be empty string '', must handle safely
+        closed_size_raw = data.get('closedSize', '0')
+        try:
+            closed_size = float(closed_size_raw) if closed_size_raw else 0.0
+        except (ValueError, TypeError):
+            closed_size = 0.0
+        
         is_closing = "Yes" if closed_size > 0 else "No"
         
         # SL/TP Extraction
