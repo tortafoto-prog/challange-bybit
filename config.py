@@ -39,22 +39,20 @@ class Config:
     if not USERS and _legacy_key:
         print("WARNING: Using legacy single-user configuration.")
         _legacy_secret = os.getenv("BYBIT_API_SECRET")
-        _use_testnet = os.getenv("USE_TESTNET", "True").lower() == "true"
         _is_eu = os.getenv("BYBIT_IS_EU", "False").lower() == "true"
+        
+        # Legacy Fallback: Defaults to LIVE unless specified otherwise?
+        # Actually safer to just assume Live for legacy single-user vars.
         
         user_obj = {
             "name": "LegacyUser",
             "id": "legacy",
-            "is_eu": _is_eu
+            "is_eu": _is_eu,
+            "live": {"key": _legacy_key, "secret": _legacy_secret}
         }
         
-        creds = {"key": _legacy_key, "secret": _legacy_secret}
-        if _use_testnet:
-            user_obj["testnet"] = creds
-        else:
-            user_obj["live"] = creds
-            
         USERS.append(user_obj)
+
 
     # ------------------------------------------------------------------
     # Webhooks
