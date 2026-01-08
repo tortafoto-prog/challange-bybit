@@ -191,26 +191,87 @@ class BybitClient:
         except (ValueError, TypeError):
             closed_size = 0.0
         
+        # CRITICAL LOGIC for Position Flip (Long->Short or Short->Long):
+        # If execQty > closedSize, it means:
+        #   - Part of the execution closed the old position (closedSize)
+        #   - The rest opened a new position in opposite direction (execQty - closedSize)
+        # We need to send TWO separate webhooks in this case!
+        
+        if closed_size > 0 and volume > closed_size:
+            # Position FLIP detected!
+            print(f"[{self.user_name}] Position FLIP detected: {symbol} {side} {volume} (closed: {closed_size}, opened: {volume - closed_size})")
+            
+            # 1. Send CLOSING trade
+            self._send_trade_webhook(
+                data=data,
+                symbol=symbol,
+                side=side,
+                price=price,
+                volume=closed_size,  # Only the closed portion
+                ticket_id=ticket_id + "_close",
+                is_closing="Yes",
+                is_history=is_history,
+                stop_loss="",
+                take_profit=""
+            )
+            
+            # 2. Send OPENING trade (for the new position)
+            opening_volume = volume - closed_size
+            self._send_trade_webhook(
+                data=data,
+                symbol=symbol,
+                side=side,
+                price=price,
+                volume=opening_volume,
+                ticket_id=ticket_id + "_open",
+                is_closing="No",
+                is_history=is_history,
+                stop_loss=None,  # Will fetch from API
+                take_profit=None
+            )
+            return  # Done, both webhooks sent
+        
+        # Normal case: either pure closing or pure opening
         is_closing = "Yes" if closed_size > 0 else "No"
         
-        # SL/TP Extraction
-        # Bybit Execution stream does NOT include SL/TP!
-        # We must query Position Info API to get these values
-        stop_loss = ""
-        take_profit = ""
-        
-        if is_closing == "No":
-            # Only fetch SL/TP for opening trades
-            # Try Position API first (for existing positions)
-            sl_tp = self.get_position_sl_tp(symbol)
+        self._send_trade_webhook(
+            data=data,
+            symbol=symbol,
+            side=side,
+            price=price,
+            volume=volume,
+            ticket_id=ticket_id,
+            is_closing=is_closing,
+            is_history=is_history,
+            stop_loss=None,
+            take_profit=None
+        )
+    
+    def _send_trade_webhook(self, data, symbol, side, price, volume, ticket_id, is_closing, is_history, stop_loss=None, take_profit=None):
+        """Helper method to send a single trade webhook."""
+        # SL/TP Extraction (only for opening trades)
+        if stop_loss is None and take_profit is None:  # Only fetch if not provided
+            stop_loss = ""
+            take_profit = ""
             
-            # If no position found (e.g., position flip Long->Short), check open orders
-            if not sl_tp or (not sl_tp.get('stopLoss') and not sl_tp.get('takeProfit')):
-                sl_tp = self.get_open_orders_sl_tp(symbol)
-            
-            if sl_tp:
-                stop_loss = sl_tp.get('stopLoss', '')
-                take_profit = sl_tp.get('takeProfit', '')
+            if is_closing == "No":
+                # Only fetch SL/TP for opening trades
+                # Try Position API first (for existing positions)
+                sl_tp = self.get_position_sl_tp(symbol)
+                
+                # If no position found (e.g., position flip Long->Short), check open orders
+                if not sl_tp or (not sl_tp.get('stopLoss') and not sl_tp.get('takeProfit')):
+                    sl_tp = self.get_open_orders_sl_tp(symbol)
+                
+                if sl_tp:
+                    stop_loss = sl_tp.get('stopLoss', '')
+                    take_profit = sl_tp.get('takeProfit', '')
+        else:
+            # Use provided values (for position flip closing part)
+            if stop_loss is None:
+                stop_loss = ""
+            if take_profit is None:
+                take_profit = ""
         
         # Position ID logic: Ticker_SL_Volume
         position_id = f"{symbol}_{stop_loss}_{volume}"
