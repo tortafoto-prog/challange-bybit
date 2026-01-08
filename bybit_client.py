@@ -201,7 +201,13 @@ class BybitClient:
         
         if is_closing == "No":
             # Only fetch SL/TP for opening trades
+            # Try Position API first (for existing positions)
             sl_tp = self.get_position_sl_tp(symbol)
+            
+            # If no position found (e.g., position flip Long->Short), check open orders
+            if not sl_tp or (not sl_tp.get('stopLoss') and not sl_tp.get('takeProfit')):
+                sl_tp = self.get_open_orders_sl_tp(symbol)
+            
             if sl_tp:
                 stop_loss = sl_tp.get('stopLoss', '')
                 take_profit = sl_tp.get('takeProfit', '')
@@ -251,6 +257,45 @@ class BybitClient:
                 print(f"[{self.user_name}] Position API Error: {resp}")
         except Exception as e:
             print(f"[{self.user_name}] Failed to fetch Position SL/TP: {e}")
+        
+        return None
+
+    def get_open_orders_sl_tp(self, symbol):
+        """Query Open Orders API to get SL/TP from conditional orders.
+        This is a fallback for when position flips (Long->Short) and SL/TP is in pending orders.
+        """
+        try:
+            resp = self.session.get_open_orders(
+                category="linear",
+                symbol=symbol
+            )
+            
+            if resp['retCode'] == 0:
+                orders = resp['result'].get('list', [])
+                
+                sl = ''
+                tp = ''
+                
+                # Look for Stop Loss and Take Profit orders
+                for order in orders:
+                    order_type = order.get('orderType', '')
+                    stop_order_type = order.get('stopOrderType', '')
+                    trigger_price = order.get('triggerPrice', '')
+                    
+                    # Stop Loss: stopOrderType contains 'Stop'
+                    if 'Stop' in stop_order_type and trigger_price:
+                        sl = trigger_price
+                    
+                    # Take Profit: stopOrderType contains 'TakeProfit' or order is limit with trigger
+                    if 'TakeProfit' in stop_order_type and trigger_price:
+                        tp = trigger_price
+                
+                if sl or tp:
+                    return {'stopLoss': sl, 'takeProfit': tp}
+            else:
+                print(f"[{self.user_name}] Open Orders API Error: {resp}")
+        except Exception as e:
+            print(f"[{self.user_name}] Failed to fetch Open Orders SL/TP: {e}")
         
         return None
 
