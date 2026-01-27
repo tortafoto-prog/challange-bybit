@@ -368,6 +368,7 @@ class BybitClient:
         
         trade_data = {
             "secret_key": Config.APP_SECRET,
+            "source": "bybit",
             "account_id": self.user_id,
             "user_id": self.user_id,
             "symbol": symbol,
