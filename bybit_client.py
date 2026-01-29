@@ -177,6 +177,10 @@ class BybitClient:
                     
                     print(f"[{self.user_name}] History Processing OrderID {order_id} (Total Vol: {agg_data['execQty']})")
                     self.process_trade_data(agg_data, is_history=True)
+                    
+                    # Rate Limit for History: Sleep to prevent overwhelming Google Sheet
+                    # GAS sync can fail if hit by too many simultaneous requests
+                    time.sleep(0.5)
             else:
                  print(f"[{self.user_name}] History Sync API Error: {resp}")
 
@@ -210,6 +214,16 @@ class BybitClient:
         if category != 'linear':
             print(f"[{self.user_name}] Ignoring {category} trade: {data.get('symbol')}")
             return
+            
+        # FILTER: Ignore Zero Volume (Invalid)
+        raw_qty = float(data.get('execQty', 0))
+        if raw_qty <= 0:
+            return
+            
+        # FILTER: Ignore UNKNOWN order types (often cancelled/unfilled debris)
+        if data.get('orderType') == 'UNKNOWN':
+             print(f"[{self.user_name}] Ignoring UNKNOWN order type: {data.get('symbol')}")
+             return
         
         # For history sync, process immediately without aggregation
         if is_history:
