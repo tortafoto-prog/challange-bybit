@@ -131,7 +131,7 @@ class BybitClient:
         try:
             # Category 'linear' for USDT Perps
             # IMPORTANT: Specify category in the request to ensure we get category field in response
-            resp = self.session.get_executions(category="linear", limit=20)
+            resp = self.session.get_executions(category="linear", limit=50)
             if resp['retCode'] == 0:
                 result = resp['result']
                 exec_list = result.get('list', [])
@@ -297,8 +297,16 @@ class BybitClient:
         side = data['side'].upper() # BUY / SELL
         price = float(data['execPrice'])
         volume = float(data['execQty'])
-        ticket_id = str(data['execId']) # Individual fill ID
+        
         order_id = str(data['orderId'])
+        
+        # STABILITY FIX: For History, use OrderID as TicketID to prevent duplicates on restart
+        if is_history:
+            ticket_id = order_id
+        else:
+            ticket_id = str(data['execId']) # Individual fill ID for Live Stream
+        
+        # Timestamp
         
         # Timestamp
         ts = int(data['execTime'])
