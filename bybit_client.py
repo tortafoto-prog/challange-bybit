@@ -139,8 +139,44 @@ class BybitClient:
                 
                 # Sort by time ascending to process properly?
                 # List usually returned desc.
-                for exc in reversed(exec_list):
-                   self.process_trade_data(exc, is_history=True)
+                
+                # AGGREGATION for History (Merge partial fills by OrderID)
+                aggregated_history = {}
+                
+                for exc in reversed(exec_list): # Process oldest to newest
+                     order_id = exc.get('orderId')
+                     if not order_id:
+                         # Fallback if no orderId (should not happen)
+                         self.process_trade_data(exc, is_history=True)
+                         continue
+                     
+                     if order_id not in aggregated_history:
+                         # New Order ID found
+                         aggregated_history[order_id] = exc.copy()
+                         aggregated_history[order_id]['execQty'] = float(exc['execQty'])
+                         
+                         closed_size = exc.get('closedSize', '0')
+                         try: closed_size = float(closed_size) if closed_size else 0.0
+                         except: closed_size = 0.0
+                         aggregated_history[order_id]['closedSize'] = closed_size # Store generic float
+                         
+                     else:
+                         # Already exists, accumulating volume
+                         aggregated_history[order_id]['execQty'] += float(exc['execQty'])
+                         
+                         closed_size = exc.get('closedSize', '0')
+                         try: closed_size = float(closed_size) if closed_size else 0.0
+                         except: closed_size = 0.0
+                         aggregated_history[order_id]['closedSize'] += closed_size
+
+                # Process the Aggregated History Items
+                for order_id, agg_data in aggregated_history.items():
+                    # Convert back to string format for consistency
+                    agg_data['execQty'] = str(agg_data['execQty'])
+                    agg_data['closedSize'] = str(agg_data['closedSize'])
+                    
+                    print(f"[{self.user_name}] History Processing OrderID {order_id} (Total Vol: {agg_data['execQty']})")
+                    self.process_trade_data(agg_data, is_history=True)
             else:
                  print(f"[{self.user_name}] History Sync API Error: {resp}")
 
