@@ -176,7 +176,7 @@ class BybitClient:
                     agg_data['closedSize'] = str(agg_data['closedSize'])
                     
                     print(f"[{self.user_name}] History Processing OrderID {order_id} (Total Vol: {agg_data['execQty']})")
-                    self.process_trade_data(agg_data, is_history=True)
+                    self.process_trade_data(agg_data, is_history=True, blocking=True)
                     
                     # Rate Limit for History: Sleep to prevent overwhelming Google Sheet
                     # GAS sync can fail if hit by too many simultaneous requests
@@ -202,7 +202,7 @@ class BybitClient:
             print(f"[{self.user_name}] Error processing message: {e}")
 
 
-    def process_trade_data(self, data, is_history=False):
+    def process_trade_data(self, data, is_history=False, blocking=False):
         # Bybit V5 Execution Data Fields:
         # category: spot, linear, inverse, option
         # symbol, side (Buy/Sell), execPrice, execQty, execId, orderId
@@ -227,14 +227,14 @@ class BybitClient:
         
         # For history sync, process immediately without aggregation
         if is_history:
-            self._process_single_execution(data, is_history=True)
+            self._process_single_execution(data, is_history=True, blocking=blocking)
             return
         
         # For live stream, aggregate by OrderID
         order_id = str(data.get('orderId', ''))
         if not order_id:
             print(f"[{self.user_name}] Warning: Execution without OrderID, processing immediately")
-            self._process_single_execution(data, is_history=False)
+            self._process_single_execution(data, is_history=False, blocking=blocking)
             return
         
         with self.aggregation_lock:
@@ -304,7 +304,7 @@ class BybitClient:
         print(f"[{self.user_name}] Flushing aggregated OrderID {order_id}: {total_volume} volume, {total_closed} closed")
         self._process_single_execution(data, is_history=False)
     
-    def _process_single_execution(self, data, is_history=False):
+    def _process_single_execution(self, data, is_history=False, blocking=False):
         """Process a single (possibly aggregated) execution."""
         symbol = data['symbol']
 
@@ -357,7 +357,8 @@ class BybitClient:
                 is_history=is_history,
                 open_time_str=open_time_str,
                 stop_loss="",
-                take_profit=""
+                take_profit="",
+                blocking=blocking
             )
             
             # 2. Send OPENING trade (for the new position)
@@ -373,7 +374,8 @@ class BybitClient:
                 is_history=is_history,
                 open_time_str=open_time_str,
                 stop_loss=None,  # Will fetch from API
-                take_profit=None
+                take_profit=None,
+                blocking=blocking
             )
             return  # Done, both webhooks sent
         
@@ -391,10 +393,11 @@ class BybitClient:
             is_history=is_history,
             open_time_str=open_time_str,
             stop_loss=None,
-            take_profit=None
+            take_profit=None,
+            blocking=blocking
         )
     
-    def _send_trade_webhook(self, data, symbol, side, price, volume, ticket_id, is_closing, is_history, open_time_str, stop_loss=None, take_profit=None):
+    def _send_trade_webhook(self, data, symbol, side, price, volume, ticket_id, is_closing, is_history, open_time_str, stop_loss=None, take_profit=None, blocking=False):
         """Helper method to send a single trade webhook."""
         # SL/TP Extraction (only for opening trades)
         if stop_loss is None and take_profit is None:  # Only fetch if not provided
@@ -444,7 +447,7 @@ class BybitClient:
         }
         
         print(f"[{self.user_name}] TRADE: {symbol} {side} {volume} @ {price} (SL: {stop_loss}, TP: {take_profit})")
-        self.send_webhook(trade_data)
+        self.send_webhook(trade_data, blocking=blocking)
 
     def get_position_sl_tp(self, symbol):
         """Query Position Info API to get SL/TP for a symbol."""
@@ -518,8 +521,11 @@ class BybitClient:
         except:
             return ""
 
-    def send_webhook(self, data):
-        threading.Thread(target=self._send_webhook_process, args=(data,), daemon=True).start()
+    def send_webhook(self, data, blocking=False):
+        if blocking:
+            self._send_webhook_process(data)
+        else:
+            threading.Thread(target=self._send_webhook_process, args=(data,), daemon=True).start()
 
     def _send_webhook_process(self, data):
         if Config.GOOGLE_WEBHOOK_URL:
