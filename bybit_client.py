@@ -65,11 +65,7 @@ class BybitClient:
         self.running = True
         print(f"[{self.user_name}] Starting Client...")
         
-        # 1. Sync History (Catch-up)
-        if self.session:
-            self.sync_history()
-            
-        # 2. Start WebSocket
+        # 1. Start WebSocket (Listen immediately to avoid gaps)
         try:
             # channel_type="private" for executions/orders
             self.ws = WebSocket(
@@ -88,6 +84,12 @@ class BybitClient:
             
         except Exception as e:
             print(f"[{self.user_name}] Failed to start WebSocket: {e}")
+
+        # 2. Sync History (Catch-up)
+        # Now that WS is listening, we can safely fetch history to fill past items.
+        # Any items arriving on WS during this time will be processed in parallel or queued.
+        if self.session:
+            self.sync_history()
             
         # 3. Start Watchdog
         self.last_start_time = time.time()
