@@ -75,7 +75,7 @@ class BybitClient:
                 api_secret=self.api_secret,
                 channel_type="private",
                 domain=self.domain_suffix,
-                ping_interval=20,  # Send Ping every 20 seconds (Keep-Alive)
+                ping_interval=3600,  # Send Ping every 20 seconds (Keep-Alive)
                 ping_timeout=10,   # Timeout if Pong not received
                 trace_logging=True # Enable logging for debug
             )
