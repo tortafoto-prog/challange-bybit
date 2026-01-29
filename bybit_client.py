@@ -437,16 +437,25 @@ class BybitClient:
             
             if is_closing == "No":
                 # Only fetch SL/TP for opening trades
+                print(f"[{self.user_name}] DEBUG: Fetching SL/TP for {symbol}...")
+                
                 # Try Position API first (for existing positions)
                 sl_tp = self.get_position_sl_tp(symbol)
                 
                 # If no position found (e.g., position flip Long->Short), check open orders
                 if not sl_tp or (not sl_tp.get('stopLoss') and not sl_tp.get('takeProfit')):
+                    print(f"[{self.user_name}] DEBUG: No Position SL/TP, checking Open Orders...")
                     sl_tp = self.get_open_orders_sl_tp(symbol)
+                
+                # If still no SL, check Order History (Initial SL on the Order)
+                if not sl_tp or (not sl_tp.get('stopLoss') and not sl_tp.get('takeProfit')):
+                    print(f"[{self.user_name}] DEBUG: No Open Order SL/TP, checking Order History for OrderID {ticket_id}...")
+                    sl_tp = self.get_order_history_sl_tp(symbol, ticket_id)
                 
                 if sl_tp:
                     stop_loss = sl_tp.get('stopLoss', '')
                     take_profit = sl_tp.get('takeProfit', '')
+                    print(f"[{self.user_name}] DEBUG: Found SL: {stop_loss}, TP: {take_profit}")
         else:
             # Use provided values (for position flip closing part)
             if stop_loss is None:
@@ -493,6 +502,7 @@ class BybitClient:
                 if positions:
                     # Return first position (usually only one per symbol in one-way mode)
                     pos = positions[0]
+                    # print(f"[{self.user_name}] DEBUG POS: {pos}")
                     return {
                         'stopLoss': pos.get('stopLoss', ''),
                         'takeProfit': pos.get('takeProfit', '')
@@ -516,6 +526,7 @@ class BybitClient:
             
             if resp['retCode'] == 0:
                 orders = resp['result'].get('list', [])
+                print(f"[{self.user_name}] DEBUG ORDERS: Found {len(orders)} open orders.")
                 
                 sl = ''
                 tp = ''
@@ -540,6 +551,32 @@ class BybitClient:
                 print(f"[{self.user_name}] Open Orders API Error: {resp}")
         except Exception as e:
             print(f"[{self.user_name}] Failed to fetch Open Orders SL/TP: {e}")
+        
+        return None
+
+    def get_order_history_sl_tp(self, symbol, order_id):
+        """Query Order History to get Initial SL/TP from the completed order."""
+        try:
+            resp = self.session.get_order_history(
+                category="linear",
+                symbol=symbol,
+                orderId=order_id,
+                limit=1
+            )
+            
+            if resp['retCode'] == 0:
+                orders = resp['result'].get('list', [])
+                if orders:
+                    order = orders[0]
+                    # print(f"[{self.user_name}] DEBUG HISTORY ORDER: {order}")
+                    return {
+                        'stopLoss': order.get('stopLoss', ''),
+                        'takeProfit': order.get('takeProfit', '')
+                    }
+            else:
+                 print(f"[{self.user_name}] Order History API Error: {resp}")
+        except Exception as e:
+             print(f"[{self.user_name}] Failed to fetch Order History SL/TP: {e}")
         
         return None
 
