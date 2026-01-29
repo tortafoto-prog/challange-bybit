@@ -67,13 +67,17 @@ class BybitClient:
         
         # 1. Start WebSocket (Listen immediately to avoid gaps)
         try:
+        try:
             # channel_type="private" for executions/orders
             self.ws = WebSocket(
                 testnet=self.use_testnet,
                 api_key=self.api_key,
                 api_secret=self.api_secret,
                 channel_type="private",
-                domain=self.domain_suffix
+                domain=self.domain_suffix,
+                ping_interval=20,  # Send Ping every 20 seconds (Keep-Alive)
+                ping_timeout=10,   # Timeout if Pong not received
+                trace_logging=True # Enable logging for debug
             )
             
             # Subscribe to 'execution' topic
