@@ -67,7 +67,7 @@ class BybitClient:
         
         # 1. Start WebSocket (Listen immediately to avoid gaps)
         try:
-        try:
+
             # channel_type="private" for executions/orders
             self.ws = WebSocket(
                 testnet=self.use_testnet,
