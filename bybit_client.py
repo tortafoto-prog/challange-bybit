@@ -2,14 +2,11 @@ import time
 import threading
 import json
 import requests
-import os
-from datetime import datetime, timedelta
 from datetime import datetime, timedelta
 from pybit.unified_trading import WebSocket, HTTP
 from config import Config
 
 class BybitClient:
-    CACHE_FILE = "processed_tickets.json"
 
     def __init__(self, api_key, api_secret, use_testnet=True, user_id="Unknown", user_name="Unknown", is_eu=False):
         self.api_key = api_key
@@ -34,10 +31,6 @@ class BybitClient:
         self.pending_executions = {}
         self.aggregation_lock = threading.Lock()
         self.aggregation_delay = 1.0  # Wait 1 second to collect all fills from same order
-        
-        # CACHE: Local storage for processed Ticket IDs to speed up history sync
-        self.processed_tickets = set()
-        self.load_cache()
         
         # Setup Endpoints (pybit handles URLs mostly, but we specify testnet boolean and suffix)
         # For .eu, pybit might need 'domain' arg or manual URL override?
@@ -66,26 +59,7 @@ class BybitClient:
         except Exception as e:
             print(f"[{self.user_name}] Error initializing HTTP Session: {e}")
 
-    def load_cache(self):
-        """Load processed Ticket IDs from local JSON file."""
-        if os.path.exists(self.CACHE_FILE):
-            try:
-                with open(self.CACHE_FILE, 'r') as f:
-                    data = json.load(f)
-                    self.processed_tickets = set(data.get('tickets', []))
-                print(f"[{self.user_name}] Loaded {len(self.processed_tickets)} tickets from cache.")
-            except Exception as e:
-                print(f"[{self.user_name}] Warning: Failed to load cache: {e}")
-        else:
-             print(f"[{self.user_name}] No cache file found. Starting fresh.")
 
-    def save_cache(self):
-        """Save processed Ticket IDs to local JSON file."""
-        try:
-            with open(self.CACHE_FILE, 'w') as f:
-                json.dump({'tickets': list(self.processed_tickets)}, f)
-        except Exception as e:
-            print(f"[{self.user_name}] Warning: Failed to save cache: {e}")
 
     def start(self):
         self.running = True
@@ -140,19 +114,20 @@ class BybitClient:
         self.start()
 
     def _watchdog_loop(self):
-        print(f"[{self.user_name}] Watchdog started. Refresh scheduled in 30 minutes.")
+        # User requested to disable periodic restart (only sync on startup)
+        print(f"[{self.user_name}] Watchdog started. (Periodic refresh DISABLED)")
         while self.running:
             time.sleep(60)
             if not self.running: break
             
-            elapsed = time.time() - self.last_start_time
-            if elapsed > 1800: # 30 mins
-                print(f"[{self.user_name}] WATCHDOG: Scheduled Restart...")
-                try:
-                    self.restart()
-                except Exception as e:
-                     print(f"[{self.user_name}] Watchdog Restart Failed: {e}")
-                break
+            # elapsed = time.time() - self.last_start_time
+            # if elapsed > 1800: # 30 mins
+            #     print(f"[{self.user_name}] WATCHDOG: Scheduled Restart...")
+            #     try:
+            #         self.restart()
+            #     except Exception as e:
+            #          print(f"[{self.user_name}] Watchdog Restart Failed: {e}")
+            #     break
 
     def sync_history(self):
         """Fetch recent executions to catch up."""
@@ -590,12 +565,6 @@ class BybitClient:
             return ""
 
     def send_webhook(self, data, blocking=False):
-        # CACHE CHECK: If ticket_id already processed, SKIP
-        ticket_id = data.get('ticket_id')
-        if ticket_id and ticket_id in self.processed_tickets:
-            print(f"[{self.user_name}] [SKIP] Trade already synced: {ticket_id}")
-            return
-
         if blocking:
             self._send_webhook_process(data)
         else:
@@ -605,15 +574,7 @@ class BybitClient:
         if Config.GOOGLE_WEBHOOK_URL:
             try:
                 resp = requests.post(Config.GOOGLE_WEBHOOK_URL, json=data, timeout=30)
-                
-                # If successful (200 OK), save to cache
-                if resp.status_code == 200:
-                    ticket_id = data.get('ticket_id')
-                    if ticket_id:
-                        self.processed_tickets.add(ticket_id)
-                        self.save_cache()
-                        # print(f"[{self.user_name}] Cached ticket: {ticket_id}")
-                else:
+                if resp.status_code != 200:
                     print(f"[{self.user_name}] Webhook Error {resp.status_code}: {resp.text}")
                     
             except Exception as e:
