@@ -446,7 +446,7 @@ class BybitClient:
         
         # Position ID logic: Symbol_SL_Volume (same as Binance)
         # Google Sheet will handle partial fills via FIFO volume matching
-        position_id = f"{symbol_{volume}"
+        position_id = f"{symbol}_{volume}"
         
         trade_data = {
             "secret_key": Config.APP_SECRET,
@@ -585,4 +585,5 @@ class BybitClient:
                     
             except Exception as e:
                 print(f"[{self.user_name}] Webhook Failed: {e}")
+
 
